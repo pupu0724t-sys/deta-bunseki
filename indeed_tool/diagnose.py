@@ -1,4 +1,4 @@
-"""CSVを読み込み、表示→クリック→応募の漏斗で数値を診断する。"""
+﻿"""CSVを読み込み、表示→クリック→応募の漏斗で数値を診断する。"""
 import csv
 import math
 import re
@@ -14,7 +14,10 @@ ALIASES = {
     "impressions": ["表示回数", "表示数", "インプレッション"],
     "clicks": ["クリック数", "クリック"],
     "apps": ["応募数", "応募"],
-    "cost": ["利用済予算", "利用済み予算", "利用済予算額", "費用", "消化金額"],
+    "cost": ["利用済予算", "利用済み予算", "利用済予算額", "利用金額", "費用", "消化金額"],
+    "ref": ["参照番号"],
+    "place": ["市区町村"],
+    "status": ["求人のステータス"],
 }
 TOTAL_WORDS = {"合計", "総計", "total", "全体"}
 
@@ -71,16 +74,26 @@ def load_listings(path):
 
     agg = {}
     for r in rows:
-        title = (r.get(cols["title"]) if cols["title"] else None) or "（職種名なし）"
-        title = title.strip()
+        title = ((r.get(cols["title"]) if cols["title"] else None) or "（職種名なし）").strip()
         if normalize_title(title) in TOTAL_WORDS:
             continue
-        key = normalize_title(title)
-        a = agg.setdefault(key, {"title": title, "impressions": 0, "clicks": 0, "apps": 0, "cost": 0.0})
+        ref = (r.get(cols["ref"]) or "").strip() if cols["ref"] else ""
+        place = (r.get(cols["place"]) or "").strip() if cols["place"] else ""
+        key = (normalize_title(title), ref, place)
+        a = agg.setdefault(key, {"full_title": title, "ref": ref, "place": place, "status": "",
+                                 "impressions": 0, "clicks": 0, "apps": 0, "cost": 0.0})
+        if cols["status"]:
+            a["status"] = (r.get(cols["status"]) or "").strip()
         for k in ("impressions", "clicks", "apps", "cost"):
             a[k] += parse_number(r.get(cols[k])) or 0
-    return list(agg.values())
-
+    items = list(agg.values())
+    same_title = {}
+    for a in items:
+        same_title[normalize_title(a["full_title"])] = same_title.get(normalize_title(a["full_title"]), 0) + 1
+    for a in items:
+        short = a["full_title"] if len(a["full_title"]) <= 24 else a["full_title"][:24] + "…"
+        a["title"] = f"{short}（{a['place']}）" if a["place"] and same_title[normalize_title(a["full_title"])] > 1 else short
+    return items
 
 def wilson(successes, n, z=Z):
     """割合の信頼区間（件数が少ないときに広くなる）。"""
@@ -154,7 +167,8 @@ def diagnose_one(item, past=None, median_impressions=None):
 
     findings = _findings(m, pm, jc, jv, bench_ctr, bench_cvr, basis, issue, volume_low)
     return {
-        "title": item["title"], "metrics": m, "past_metrics": pm,
+        "title": item["title"], "full_title": item.get("full_title", item["title"]), "ref": item.get("ref", ""),
+        "place": item.get("place", ""), "status": item.get("status", ""), "metrics": m, "past_metrics": pm,
         "benchmark": {"ctr": bench_ctr, "cvr": bench_cvr, "basis": basis},
         "ctr": jc, "cvr": jv, "issue": issue, "volume_low": volume_low, "findings": findings,
     }
@@ -207,14 +221,18 @@ def _findings(m, pm, jc, jv, bctr, bcvr, basis, issue, volume_low):
     return out
 
 
+def _past_key(x):
+    return (normalize_title(x["full_title"]), x.get("ref", ""), x.get("place", ""))
+
+
 def diagnose(csv_path, past_path=None):
     listings = load_listings(csv_path)
     past_map = {}
     if past_path:
-        past_map = {normalize_title(p["title"]): p for p in load_listings(past_path)}
+        past_map = {_past_key(p): p for p in load_listings(past_path)}
     imps = [x["impressions"] for x in listings if x["impressions"] > 0]
     median_imp = statistics.median(imps) if len(imps) >= 2 else None
-    results = [diagnose_one(x, past_map.get(normalize_title(x["title"])), median_imp) for x in listings]
+    results = [diagnose_one(x, past_map.get(_past_key(x)), median_imp) for x in listings]
 
     total = {"title": "全体", **{k: sum(x[k] for x in listings) for k in ("impressions", "clicks", "apps", "cost")}}
     overall = diagnose_one(total)
@@ -222,3 +240,4 @@ def diagnose(csv_path, past_path=None):
         r["issue_label"] = ISSUE_LABEL[r["issue"]]
     overall["issue_label"] = ISSUE_LABEL[overall["issue"]]
     return {"listings": results, "overall": overall}
+

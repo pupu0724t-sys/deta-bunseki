@@ -1,4 +1,4 @@
-"""診断結果と分析文（JSON）から、お客様向けPowerPointを作る。"""
+﻿"""診断結果と分析文（JSON）から、お客様向けPowerPointを作る。"""
 import math
 
 from pptx import Presentation
@@ -230,9 +230,10 @@ def build(diagnosis, analysis, out_path):
     # 原稿別
     for d in listings:
         a = by_title.get(d["title"], {})
-        metrics_slide(prs, d, f"数値の診断：{d['title']}")
+        nm = d.get("place") or d["title"]
+        metrics_slide(prs, d, f"数値の診断：{nm}")
         if a.get("observations"):
-            s = new_slide(prs, f"原稿の課題点：{d['title']}", "数値の診断と、原稿の該当箇所を結びつけて整理しました。")
+            s = new_slide(prs, f"原稿の課題点：{nm}", "数値の診断と、原稿の該当箇所を結びつけて整理しました。")
             n = len(a["observations"])
             rh = min(1.7, 5.3 / n)
             for i, o in enumerate(a["observations"]):
@@ -244,7 +245,7 @@ def build(diagnosis, analysis, out_path):
                 text_box(s, 3.1, y + 0.05, 9.5, rh - 0.1,
                          [f"課題：{o['problem']}", f"根拠：{o['evidence']}"], start=14, minimum=10)
         if a.get("proposals"):
-            s = new_slide(prs, f"改善案の一覧：{d['title']}", "課題と提案の対応です。詳細は次ページ以降をご覧ください。")
+            s = new_slide(prs, f"改善案の一覧：{nm}", "課題と提案の対応です。詳細は次ページ以降をご覧ください。")
             ps = a["proposals"]
             shape = s.shapes.add_table(len(ps) + 1, 4, Inches(0.6), Inches(1.7), Inches(12.1), Inches(0.9 * (len(ps) + 1)))
             for i, wd in enumerate([2.6, 3.0, 4.5, 2.0]):
@@ -255,9 +256,9 @@ def build(diagnosis, analysis, out_path):
                 for c, v in enumerate([f"案{r}　{p['name']}", p["area"], p["issue"], p["target_metric"]]):
                     _cell(shape.table.cell(r, c), v, False)
             for i, p in enumerate(ps, 1):
-                proposal_slide(prs, d["title"], i, p)
+                proposal_slide(prs, nm, i, p)
         if a.get("competitor_ideas"):
-            s = new_slide(prs, f"同業他社に見られる工夫（参考）：{d['title']}",
+            s = new_slide(prs, f"同業他社に見られる工夫（参考）：{nm}",
                           "掲載中の他社原稿から、特徴的な内容を紹介します。効果の優劣は判断していません。")
             n = len(a["competitor_ideas"])
             cw = (12.1 - 0.3 * (n - 1)) / n
@@ -292,3 +293,4 @@ def _cell(cell, text, header):
     cell.fill.solid()
     cell.fill.fore_color.rgb = NAVY if header else WHITE
     cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+

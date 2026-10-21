@@ -15,6 +15,10 @@ python run.py build output/diagnosis.json analysis.json -o output/report.pptx
 ```
 `analysis.json` の書式は `samples/sample_analysis.json`（ダミー）を参照。
 
+## 提案書の作り方（現在の運用）
+CSVと原稿PDFをClaudeに渡し、`docs/提案書作成プロンプト.md` の内容で依頼する。
+数値の診断（`run.py diagnose`）は、計算の確認用として使える。
+
 ## 判定のルール
 - 基準：過去実績があればそれ。なければ クリック率5%・応募率1.5%
 - 件数が少ないときは断定しない（95%信頼区間が基準をまたぐ場合は「判断保留」）
