@@ -21,7 +21,33 @@ def main():
     b.add_argument("diagnosis")
     b.add_argument("analysis")
     b.add_argument("-o", default="output/report.pptx")
+    p = sub.add_parser("proposal", help="データと原稿から提案書を作る（prepare：下準備／build：組み立て）")
+    p.add_argument("action", choices=["prepare", "build"])
+    p.add_argument("paths", nargs="+", help="prepare：日別CSV（原稿ごと）／build：作業フォルダ")
+    p.add_argument("--pdf", help="原稿PDF（prepare）")
+    p.add_argument("--client", default="（顧客名）", help="顧客名（prepare）")
+    p.add_argument("--nearby", help="周辺求人のCSV（build）")
+    p.add_argument("--forbid-file", help="他のお客様の名前を1行ずつ書いたファイル。含まれていたら作成を中止（build）")
+    p.add_argument("--name", default="提案書", help="出力ファイル名（build）")
+    p.add_argument("-o", default=None)
     args = ap.parse_args()
+    if args.cmd == "proposal":
+        from indeed_tool import pipeline
+        if args.action == "prepare":
+            out = args.o or "data/work"
+            r = pipeline.prepare(args.paths, args.pdf, out, args.client)
+            print(f"下準備ができました: {out}")
+            print(f"  作業メモ: {out}/brief.md\n  提案の中身: {out}/proposal_spec.json（Claudeが書く）\n  補足情報: {out}/staff_meta.json")
+        else:
+            forbid = []
+            if args.forbid_file:
+                with open(args.forbid_file, encoding="utf-8-sig") as fh:  # BOMつきでも読める
+                    forbid = [ln.strip() for ln in fh if ln.strip()]
+            pptx, xlsx, unresolved = pipeline.build_all(args.paths[0], args.o or "output", args.nearby, forbid, args.name)
+            print(f"提案書: {pptx}\n担当者向け資料: {xlsx}")
+            if unresolved:
+                print(f"注意: （要記入）が{unresolved}か所残っています", file=sys.stderr)
+        return
 
     import os
     os.makedirs(os.path.dirname(args.o) or ".", exist_ok=True)
