@@ -608,9 +608,20 @@ def slide_plan(prs, sp, page):
            [[str(i)] + list(r) for i, r in enumerate(sp["rows"], 1)], row_h=rh, size=10.5, wrap_first_bold=False)
 
 
+def slide_followup(prs, sp, page):
+    """前回のご提案からの変化：指標の表と、前回の提案の一覧。"""
+    s = new_slide(prs, sp["title"], page, sp.get("notes"))
+    text(s, 0.6, 1.1, 12.1, 0.35, sp.get("lead", ""), size=11.5, color=GRAY)
+    end = _table(s, 0.6, 1.55, [3.0, 3.0, 3.0, 3.1], ["指標", "前回のご提案時", "今回", "変化"], sp["rows"], row_h=0.5, size=13, hl_col=2)
+    box(s, 0.6, end + 0.15, 12.1, 6.85 - end - 0.15, PANEL)
+    text(s, 0.85, end + 0.22, 11.6, 0.35, "前回のご提案", size=12.5, color=NAVY, bold=True)
+    text(s, 0.85, end + 0.6, 11.6, 6.75 - end - 0.6, sp.get("proposals", ""), size=12, color=TEXT)
+
+
 TYPES = {"cover": slide_cover, "funnel": slide_funnel, "issues": slide_issues, "overview": slide_overview,
          "title_ba": slide_title_ba, "proposal": slide_proposal, "kpi": slide_kpi, "checklist": slide_checklist,
-         "goal": slide_goal, "summary": slide_summary, "decompose": slide_decompose, "plan": slide_plan}
+         "goal": slide_goal, "summary": slide_summary, "decompose": slide_decompose, "plan": slide_plan,
+         "followup": slide_followup}
 
 
 def build(spec, out_path):

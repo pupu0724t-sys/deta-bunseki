@@ -212,7 +212,7 @@ def rule_catch(D, text, chk, t_job, t_catch, nearby):
         reasons.append("年代の表記は、該当しない方が対象外と感じる可能性")
     else:
         reasons.append("原稿にある働きやすさの強みが、一覧では伝わっていない")
-    return P(id="catch", stage="ctr", score=7, name="キャッチを一覧で重複しない強みに",
+    return P(id="catch", stage="ctr", score=7, name="キャッチを重複しない強みに",
              purpose="一覧の別欄と重なる情報を外し、選ぶ理由を出す", tag="今回原稿", confirm=False,
              title_before=struck, title_after_catch=after_catch,
              slide={"type": "proposal", "title": "提案{no}|キャッチを「一覧で重複しない強み」にする",
@@ -238,7 +238,7 @@ def rule_brand(D, text, chk, t_job, t_catch, nearby):
     if brand in _n(t_job) or not re.search(r"チェーン|ブランド|店|フランチャイズ", t):
         return None
     after_job = re.sub(r"^.*?(の|：)", brand + r"\1", t_job, count=1) if re.search(r"の|：", t_job) else f"{brand}の{t_job}"
-    return P(id="brand", stage="ctr", score=5, name=f"職種名で「{brand}」を伝える",
+    return P(id="brand", stage="ctr", score=5, name=f"職種名に「{brand}」",
              purpose=f"「{brand}」で探す方に届くようにする", tag="確認後に掲載", confirm=True,
              title_job_after=after_job,
              slide={"type": "proposal", "title": f"提案{{no}}|職種名で「{brand}」を伝える",
@@ -447,7 +447,7 @@ def _blank_rule(pid, score, name, purpose, title, before, after, caption, panel_
                     "panel": _panel("応募率の改善｜確認後に掲載", panel_before, panel_after, panel_purpose,
                                     eff(D, "asr", "前後", "（他の本文の提案と合わせて）"), reasons),
                     "notes": (notes or []) + ["〇〇は確認のうえ記載。事実が確認できた項目のみ掲載する"]},
-             checklist=check, plan=("情報受領後", name, "応募開始率"))
+             checklist=check)
 
 
 def rule_salary_example(D, text, chk):
@@ -550,11 +550,135 @@ def rule_structure(D, text, chk):
              checklist=None, plan=("すぐ", "冒頭の条件まとめ・重複削除", "応募開始率"))
 
 
+# ---------- 2巡目以降の切り口（原稿に足りない判断材料・運用） ----------
+def rule_people(D, text, chk):
+    """一緒に働く人の人数・構成が数字で書かれていない。"""
+    t = _n("\n".join(body_lines(text)))
+    if re.search(r"(社員|スタッフ|従業員|メンバー)\s*(\d+|〇)\s*名", t):
+        return None
+    if not re.search(r"人員|チーム|職場|スタッフ|仲間|助け合", t):
+        return None
+    before = grab(text, r"人員|チーム|助け合|職場|少人数", 0, 4) + ["→ 人数・構成の記載なし"]
+    after = ["**【一緒に働く仲間】**", "**◆ 社員〇名・アルバイト〇名**", "**◆ 1シフト〇名体制**", "**◆ 平均年齢〇歳（20代〇割・30代〇割）**"]
+    return _blank_rule("people", 5, "職場の人数・構成を数字で書く", "働く環境の不安に、数字で答える", "一緒に働く人の人数・構成を数字で書く",
+                       before[:5], after, "「余裕のある人員配置」「チーム」などの言葉を、数字で裏付けます。", "人数・構成の記載なし", "社員・アルバイトの人数、1シフトの人数",
+                       "「人が足りなくて大変では」「人間関係は」という不安に、具体的な数字で答える",
+                       ["人員や雰囲気を言葉だけで書くと、裏付けがなく信じられにくい", "接客・店舗の仕事は、一緒に働く人の数で忙しさが想像される"],
+                       ("職場の人数・構成", "社員・アルバイトの人数、1シフトの人数、平均年齢・年代"), D)
+
+
+def rule_voice(D, text, chk):
+    """先輩社員の声（入社の決め手・前職）がない。"""
+    t = _n(text)
+    if re.search(r"先輩|社員の声|インタビュー|入社の決め手|入社理由|前職", t):
+        return None
+    before = ["（先輩社員の声・入社の決め手の記載なし）"] + grab(text, r"未経験|中途", 0, 3)
+    after = ["**【先輩の声】**", "**◆ 〇〇さん（入社〇年目・前職〇〇）**", "**「入社の決め手は〇〇でした」**", "**「最初は〇〇が不安でしたが、〇〇」**"]
+    return _blank_rule("voice", 4, "先輩社員の声を載せる", "「自分と似た人が働けている」を見せる", "先輩社員の声（入社の決め手）を載せる",
+                       before[:5], after, "前職や入社前の不安が自分と近い人の声は、応募の後押しになります。", "先輩の声なし", "前職・入社の決め手・入社前の不安",
+                       "未経験・転職の方が「自分にもできそう」と感じる材料を、実際に働く人の言葉で示す",
+                       ["未経験歓迎の求人では、自分と似た経歴の人が働けているかを確かめたい", "会社の説明より、働く人の言葉の方が具体的で信じられやすい"],
+                       ("先輩社員の声", "掲載できる社員（入社年数・前職・入社の決め手・入社前の不安）"), D)
+
+
+def rule_selection(D, text, chk):
+    """選考の回数・期間・見学の可否が書かれていない。"""
+    t = _n(text)
+    if re.search(r"面接\s*\d\s*回|一次面接|最終面接|WEB面接|オンライン面接|見学", t):
+        return None
+    before = (grab(text, r"選考|応募|面接", 0, 3) or ["（選考の流れの記載なし）"]) + ["→ 面接の回数・期間の記載なし"]
+    after = ["**【選考について】**", "**◆ 面接は〇回（WEB面接も可）**", "**◆ 応募から内定まで〇日程度**", "**◆ 職場見学OK・在職中の方も歓迎**"]
+    return _blank_rule("selection", 4, "選考の流れを軽く見せる", "応募の心理的なハードルを下げる", "選考の回数・期間を明記し、応募を軽くする",
+                       before[:5], after, "選考の手間と期間が見えると、在職中の方も応募しやすくなります。", "選考の流れの記載なし", "面接回数・期間・見学の可否",
+                       "応募した後に何が起きるかを見せ、「とりあえず応募してみよう」と思える状態にする",
+                       ["選考の手間や期間が見えないと、在職中の方は応募を後回しにしやすい", "面接回数が少ない・見学できることは、それ自体が応募の後押しになる"],
+                       ("選考の流れ", "面接の回数、WEB面接の可否、内定までの日数、見学の可否"), D)
+
+
+def rule_welfare(D, text, chk):
+    """社割・食事補助などが「あり」だけで、内容・金額がない。"""
+    t = _n(text)
+    items = [lab for lab, pat in (("社員割引", r"社割|社員割引"), ("食事補助", r"食事補助|まかない|食費補助"), ("資格手当", r"資格(取得)?手当"),
+                                   ("住宅手当", r"住宅手当")) if re.search(pat, t)]
+    if not items:
+        return None
+    if re.search(r"(社割|割引|補助|まかない)[^\n]{0,12}(\d+\s*(%|％|円)|半額|無料)", t):
+        return None
+    before = grab(text, r"社割|社員割引|食事補助|まかない|食費補助|資格(取得)?手当|住宅手当", 0, 5)
+    after = ["**【福利厚生の中身】**"] + [f"**◆ {i}：〇〇（金額・割合）**" for i in items[:4]]
+    return _blank_rule("welfare", 3, "福利厚生の中身を具体的に書く", "「ある」だけでなく、どれだけ得かを伝える", "福利厚生を「あり」から、金額・内容まで具体化する",
+                       before[:5] or ["（福利厚生の記載のみ）"], after, "「〇〇あり」を、金額や割合で書くと比べやすくなります。", "「〇〇あり」のみ", "金額・割合・使える範囲",
+                       "福利厚生の価値を具体的に伝え、他の求人と比べたときの決め手にする",
+                       ["「あり」だけでは、どの程度の制度か分からず、比べる材料にならない", "金額で書くと、月給以外の実質的な待遇として伝わる"],
+                       ("福利厚生の中身", "・".join(items[:4]) + "の金額・割合・条件"), D)
+
+
+def rule_commute(D, text, chk):
+    """交通費が「規定支給」だけで、上限・全額の別がない。"""
+    t = _n(text)
+    if not re.search(r"交通費", t) or re.search(r"交通費[\s\S]{0,24}?(全額|上限|\d|定期)", t):
+        return None
+    before = grab(text, r"交通費|通勤|車通勤|駐車場", 0, 3)
+    after = ["**【通勤】**", "**◆ 交通費：全額支給（上限〇円／月）**", "**◆ 車・バイク通勤：〇〇（駐車場〇〇）**"]
+    return _blank_rule("commute", 3, "交通費と通勤方法を明記する", "通えるかどうかを、応募前に判断できるように", "交通費の上限と通勤方法を明記する",
+                       before[:4] or ["交通費規定支給"], after, "通勤の条件は、応募を決める前に確かめたい情報です。", "交通費「規定支給」のみ", "上限・全額の別、車通勤の可否",
+                       "遠方の方や車で通いたい方が、自分が通えるかを応募前に判断できるようにする",
+                       ["「規定支給」だけでは、全額出るのか、上限があるのか分からない", "通勤の条件は、勤務地を選ぶときの基本的な判断材料"],
+                       ("交通費・通勤", "交通費の上限、車・バイク通勤と駐車場の有無"), D)
+
+
+def rule_delivery(D):
+    """前回より1日の表示回数が大きく減っている：配信設定（予算配分など）の確認。"""
+    if not D["mp"] or not D["mp"]["ipd"] or not D["mc"]["ipd"]:
+        return None
+    r = D["mc"]["ipd"] / D["mp"]["ipd"]
+    if r >= 0.7:
+        return None
+    mp, mc = D["mp"], D["mc"]
+    return P(id="delivery", stage="ctr", score=5, name="配信設定の変化を確認する", purpose="表示が減った理由を確かめ、表示回数を戻す",
+             tag="確認後に実施", confirm=True,
+             slide={"type": "proposal", "title": "提案{no}|1日の表示回数の減少を、配信設定から見直す",
+                    "visual": {"type": "search_compare", "head": "表示回数の変化", "note": f"({D['lp']} → {D['lc']})",
+                               "cards": [{"label": D["lp"], "title": f"1日 約{mp['ipd']:.0f}回表示・クリック率{pct(mp['ctr'])}"},
+                                         {"label": D["lc"], "after": True, "title": f"**1日 約{mc['ipd']:.0f}回表示**・クリック率{pct(mc['ctr'])}"}],
+                               "bars_head": "1日あたり", "pairs": [["表示回数", f"{mp['ipd']:.0f}回", f"{mc['ipd']:.0f}回"], ["費用", f"{mp['cpd']:,.0f}円", f"{mc['cpd']:,.0f}円"]]},
+                    "panel": _panel("表示回数の改善｜確認後に実施", f"1日 約{mc['ipd']:.0f}回表示（約{(1 - r) * 100:.0f}%減）", "予算配分・配信設定を確認して調整",
+                                    "表示回数が減った理由（予算配分・入札・配信設定）を確かめ、関心の合う方への表示を戻す",
+                                    [f"1日の表示回数 約{mc['ipd']:.0f}回 → **約{mp['ipd']:.0f}回**", f"（{D['lp']}の水準）"],
+                                    [f"1日の費用はほぼ同じなのに、表示回数が約{(1 - r) * 100:.0f}%減っている", "原稿を変えていない場合、配信側の設定や競合の変化が考えられる"]),
+                    "notes": ["表示回数が減った理由（予算配分の設定・入札・競合）は未確認", "表示を絞ってクリック率が上がっている可能性もあり、応募数で判断する"]},
+             checklist=("配信設定", f"{D['lp']}→{D['lc']}で、予算配分・入札・配信の設定を変えたか"))
+
+
+def followup(D, last):
+    """前回のご提案からの数値の変化（2回目以降）。"""
+    m = last.get("metrics", {})
+    mc = D["mc"]
+    rows = []
+    for k, lab, fmt in (("ctr", "クリック率", pct), ("asr", "応募開始率", pct), ("acr", "応募完了率", pct), ("cvr", "応募率", pct),
+                        ("cpc", "クリック単価", yen), ("cpa", "応募単価", yen)):
+        a, b = m.get(k), mc.get(k)
+        if a is None and b is None:
+            continue
+        if a is not None and b is not None and a:
+            ch = (b - a) / a
+            good = ch < 0 if k in ("cpc", "cpa") else ch > 0
+            diff = f"**{ch * 100:+.0f}%**" if not good and abs(ch) >= 0.05 else f"{ch * 100:+.0f}%"
+        else:
+            diff = "－"
+        rows.append([lab, fmt(a), fmt(b), diff])
+    props = "／".join(p["name"] for p in last.get("proposals", [])[:7])
+    return {"type": "followup", "title": "前回のご提案からの変化", "lead": f"前回：{last.get('date', '')}（{last.get('deck', '')}）。数値は同じ指標で比べています",
+            "rows": rows, "proposals": props,
+            "notes": ["前回の提案のうち、反映されたものと時期を確認して、効果を判断する", "件数が少ない場合は、変化を断定しない"]}
+
+
 # ---------- 組み立て ----------
 STAGE_W = {"bad": 3, "watch": 2, "ok": 1, "nodata": 1}
 
 
-def build_spec(aggs, text, chk, client, nearby=None, market=None, posted=None, max_props=7):
+def build_spec(aggs, text, chk, client, nearby=None, market=None, posted=None, max_props=7, exclude=None, round_no=1, last_round=None):
+    """exclude: 前回までに提案済みの提案ID。候補から除く（同じ提案を繰り返さない）。"""
     D = diagnose_funnel(aggs)
     emp, t_job, t_catch = split_title(chk.get("title", ""))
     chk = dict(chk, emp=emp)
@@ -562,8 +686,13 @@ def build_spec(aggs, text, chk, client, nearby=None, market=None, posted=None, m
              rule_market(D, market), rule_cpc(D, t_job, market), rule_image(D, text, chk, t_catch, market), rule_repost(D, posted),
              rule_overtime(D, text, chk, t_job, t_catch), rule_docs(D, text, chk), rule_salary_example(D, text, chk),
              rule_basics(D, text, chk, emp), rule_career(D, text, chk), rule_sales(D, text, chk, t_job),
-             rule_company(D, text, chk), rule_structure(D, text, chk)]
+             rule_company(D, text, chk), rule_structure(D, text, chk),
+             rule_people(D, text, chk), rule_voice(D, text, chk), rule_selection(D, text, chk), rule_welfare(D, text, chk),
+             rule_commute(D, text, chk), rule_delivery(D)]
     cands = [c for c in cands if c]
+    skipped = [c for c in cands if c["id"] in (exclude or set())]
+    cands = [c for c in cands if c["id"] not in (exclude or set())]
+    D["skipped"] = [c["name"] for c in skipped]
     for c in cands:
         stage = "ctr" if c["stage"] == "cpc" else c["stage"]
         w = max(STAGE_W[D["status"][stage]], STAGE_W[D["status"]["cpc"]] if c["stage"] == "cpc" else 0)
@@ -575,17 +704,22 @@ def build_spec(aggs, text, chk, client, nearby=None, market=None, posted=None, m
     ordered = sorted(ctr_g, key=lambda c: -c["prio"]) + rest
     for i, c in enumerate(ordered, 1):
         c["no"] = i
+        c["slide"]["pid"] = c["id"]
         c["slide"]["title"] = c["slide"]["title"].replace("{no}", str(i))
         if c is top:
             c["slide"]["title"] += "（最優先）"
 
-    slides = [cover(client, D), funnel(D), decompose(D), summary(D, ordered, top), issues(D, ordered, t_catch)]
+    slides = [cover(client, D, round_no), funnel(D)]
+    basis = f"{D['lp'] + '→' if D['lp'] else ''}{D['lc']}（{D['cur']['first']}〜{D['cur']['last']}）"
+    if last_round and last_round.get("metrics") and last_round.get("basis") != basis:  # 同じデータ期間なら比べない
+        slides.append(followup(D, last_round))
+    slides += [decompose(D), summary(D, ordered, top), issues(D, ordered, t_catch)]
     slides.append(overview(ordered, top))
     tb = title_ba(chk, emp, t_job, t_catch, ordered)
     if tb:
         slides.append(tb)
     slides += [c["slide"] for c in ordered]
-    slides += [kpi(D, ordered), plan(ordered), goal(ordered), checklist(D, ordered)]
+    slides += [kpi(D, ordered), goal(ordered), checklist(D, ordered)]  # 進め方・実行計画は入れない（ユーザーの方針）
     meta_fill = {"conclusion": summary_sentence(D), "priority": f"提案{top['no']}（{top['name']}）" if top else "（なし）",
                  "order": order_sentence(ordered), "unconfirmed": "／".join(c["checklist"][0] for c in ordered if c.get("checklist")) or "なし",
                  "need": {str(c["no"]): c["checklist"][1] for c in ordered if c.get("checklist")}}
@@ -615,12 +749,13 @@ def order_sentence(ordered):
     return " → ".join(s) or "－"
 
 
-def cover(client, D):
+def cover(client, D, round_no=1):
     cur = D["cur"]
     sub = f"対象：{cur['title'][:40]}（{cur['first']}〜{cur['last']}）"
     if D["prev"]:
         sub += f"／比較：{D['lp']}（{D['prev']['first']}〜{D['prev']['last']}）"
-    return {"type": "cover", "title": "Indeed掲載原稿 改善のご提案", "client": f"{client} 御中", "sub": sub}
+    return {"type": "cover", "title": "Indeed掲載原稿 改善のご提案" + (f"（第{round_no}回）" if round_no > 1 else ""),
+            "client": f"{client} 御中", "sub": sub}
 
 
 def funnel(D):
@@ -715,16 +850,15 @@ def overview(ordered, top):
     right = [c for c in ordered if c["stage"] not in ("ctr", "cpc")]
 
     def it(c):
-        return {"no": c["no"], "name": c["name"][:14], "purpose": c["purpose"][:24], "tag": c["tag"], "confirm": c["confirm"]}
+        return {"no": c["no"], "name": c["name"][:15], "purpose": c["purpose"][:28], "tag": c["tag"], "confirm": c["confirm"]}
 
     cols = []
     if left:
-        cols.append({"head": "クリック率の改善", "sub": f"提案{left[0]['no']}〜{left[-1]['no']}／一覧", "items": [it(c) for c in left],
-                     "footer": ["**進め方**"] + [x for x in order_sentence(ordered).split(" → ")]})
+        rng = f"提案{left[0]['no']}" + (f"〜{left[-1]['no']}" if len(left) > 1 else "")
+        cols.append({"head": "クリック率の改善", "sub": f"{rng}／一覧", "items": [it(c) for c in left]})
     if right:
-        cols.append({"head": "応募率の改善", "sub": f"提案{right[0]['no']}〜{right[-1]['no']}／本文・応募導線", "items": [it(c) for c in right]})
-    if len(cols) == 1 and "footer" not in cols[0]:
-        cols[0]["footer"] = ["**進め方**"] + order_sentence(ordered).split(" → ")
+        rng = f"提案{right[0]['no']}" + (f"〜{right[-1]['no']}" if len(right) > 1 else "")
+        cols.append({"head": "応募率の改善", "sub": f"{rng}／本文・応募導線", "items": [it(c) for c in right]})
     return {"type": "overview", "title": f"ご提案の全体像({len(ordered)}つ)", "columns": cols, "notes": [TEXT_ONLY_NOTE]}
 
 

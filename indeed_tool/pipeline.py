@@ -371,7 +371,33 @@ def deck_text(spec, meta):
     return json.dumps(spec, ensure_ascii=False) + json.dumps(meta, ensure_ascii=False)
 
 
-def build_all(workdir, outdir, nearby_path=None, forbid=None, name="提案書"):
+def record_history(history_path, spec, deck, client=None, metrics=None, basis=None):
+    """提案書に載った提案を履歴に記録する。同じ提案書名の回があれば置き換える（Claudeが提案を足して組み直したとき）。"""
+    h = load_history(history_path)
+    props = []
+    for s in spec["slides"]:
+        if s["type"] != "proposal":
+            continue
+        name = s["title"].split("|", 1)[-1].replace("（最優先）", "")
+        props.append({"id": s.get("pid") or "custom:" + name, "name": name, "status": "提案済み"})
+    rd = next((r for r in h["rounds"] if r.get("deck") == deck), None)
+    if rd is None:
+        rd = {"date": date.today().strftime("%Y/%m/%d"), "deck": deck}
+        h["rounds"].append(rd)
+    rd["proposals"] = props
+    if metrics is not None:
+        rd["metrics"] = metrics
+    if basis:
+        rd["basis"] = basis
+    if client:
+        h["client"] = client
+    os.makedirs(os.path.dirname(history_path) or ".", exist_ok=True)
+    with open(history_path, "w", encoding="utf-8") as fh:
+        json.dump(h, fh, ensure_ascii=False, indent=2)
+    return props
+
+
+def build_all(workdir, outdir, nearby_path=None, forbid=None, name="提案書", history_path=None):
     with open(os.path.join(workdir, "proposal_spec.json"), encoding="utf-8") as fh:
         spec = json.load(fh)
     with open(os.path.join(workdir, "staff_meta.json"), encoding="utf-8") as fh:
@@ -388,6 +414,8 @@ def build_all(workdir, outdir, nearby_path=None, forbid=None, name="提案書"):
     build_deck(spec, pptx)
     build_workbook(os.path.join(workdir, "combined.csv"), spec, meta, xlsx, nearby_path)
     unresolved = deck_text(spec, meta).count("（要記入")
+    if history_path:
+        record_history(history_path, spec, os.path.basename(pptx))
     return pptx, xlsx, unresolved
 
 
@@ -409,10 +437,35 @@ def load_market(path):
     return rows
 
 
+def load_history(path):
+    if path and os.path.exists(path):
+        with open(path, encoding="utf-8-sig") as fh:
+            return json.load(fh)
+    return {"rounds": [], "manual": []}
+
+
+def proposed_ids(h):
+    """提案済みの提案ID。status が「再提案可」のものは除く。"""
+    ids = set()
+    for rd in h.get("rounds", []):
+        for p in rd.get("proposals", []):
+            if p.get("status") != "再提案可" and p.get("id"):
+                ids.add(p["id"])
+    for m in h.get("manual", []):
+        if m.get("status") != "再提案可":
+            ids.update(m.get("ids", []))
+    return ids
+
+
 def auto(csv_paths, pdf_path, workdir, outdir, client, nearby_path=None, market_path=None, posted=None,
-         forbid=None, name="提案書", max_props=7):
-    """下準備 → ルールで提案を自動作成 → 提案書(pptx)と担当者向け資料(xlsx)まで一気に作る。"""
+         forbid=None, name="提案書", max_props=7, history_path=None, redo=False):
+    """下準備 → ルールで提案を自動作成 → 提案書(pptx)と担当者向け資料(xlsx)まで一気に作る。
+    history_path：会社ごとの提案履歴。提案済みの提案は除き、作成後に今回の提案を追記する。
+    redo：直前の回の作り直し（修正）。直前の回を置き換え、履歴の重複扱いにしない。"""
     from indeed_tool import rules
+    hist = load_history(history_path)
+    if redo and hist["rounds"]:
+        hist["rounds"] = hist["rounds"][:-1]
     r = prepare(csv_paths, pdf_path, workdir, client)
     with open(os.path.join(workdir, "原稿.txt"), encoding="utf-8") as fh:
         text = fh.read()
@@ -421,7 +474,11 @@ def auto(csv_paths, pdf_path, workdir, outdir, client, nearby_path=None, market_
         sal = (r["checks"].get("salary") or {}).get("monthly_low")
         nearby = nb.summarize(nb.load(nearby_path), client=sal)
     spec, meta_fill, D, ordered = rules.build_spec(r["aggs"], text, r["checks"], client, nearby,
-                                                   load_market(market_path), posted, max_props)
+                                                   load_market(market_path), posted, max_props,
+                                                   exclude=proposed_ids(hist), round_no=len(hist["rounds"]) + 1,
+                                                   last_round=(hist["rounds"][-1] if hist["rounds"] else None))
+    if not ordered:  # 履歴にない自動提案がない：提案はClaudeが考えて加える。それまで組み立てない
+        spec["slides"].insert(5, {"type": "todo", "note": "履歴にない新しい提案を考えて、overview・title_ba・proposal・kpi・goal・checklist のスライドを書く"})
     with open(os.path.join(workdir, "proposal_spec.json"), "w", encoding="utf-8") as fh:
         json.dump(spec, fh, ensure_ascii=False, indent=2)
     mp = os.path.join(workdir, "staff_meta.json")
@@ -433,5 +490,15 @@ def auto(csv_paths, pdf_path, workdir, outdir, client, nearby_path=None, market_
                                 "担当者向け資料の「5.周辺比較」。提案書では社名を出さない"])
     with open(mp, "w", encoding="utf-8") as fh:
         json.dump(meta, fh, ensure_ascii=False, indent=2)
+    if not ordered:
+        return None, None, [], D.get("skipped", [])
     pptx, xlsx, _ = build_all(workdir, outdir, nearby_path, forbid, name)
-    return pptx, xlsx, ordered
+    if history_path:
+        mc = D["mc"]
+        if redo:  # 作り直し：直前の回を外した履歴を書き戻してから記録する
+            with open(history_path, "w", encoding="utf-8") as fh:
+                json.dump(hist, fh, ensure_ascii=False, indent=2)
+        record_history(history_path, spec, os.path.basename(pptx), client,
+                       {k: (round(mc[k], 4) if mc.get(k) is not None else None) for k in ("ctr", "asr", "acr", "cvr", "cpc", "cpa")},
+                       f"{D['lp'] + '→' if D['lp'] else ''}{D['lc']}（{D['cur']['first']}〜{D['cur']['last']}）")
+    return pptx, xlsx, ordered, D.get("skipped", [])

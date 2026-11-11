@@ -67,8 +67,10 @@ class RulesTest(unittest.TestCase):
         self.assertIsNotNone(rules.rule_docs(D, TEXT, self.chk))
         self.assertLessEqual(len(ordered), 7)
         types = [s["type"] for s in spec["slides"]]
-        for t in ("cover", "funnel", "decompose", "summary", "overview", "proposal", "kpi", "plan", "checklist"):
+        for t in ("cover", "funnel", "decompose", "summary", "overview", "proposal", "kpi", "checklist"):
             self.assertIn(t, types)
+        self.assertNotIn("plan", types)  # 進め方・実行計画は入れない
+        self.assertNotIn("進め方", json.dumps(spec, ensure_ascii=False))
         self.assertNotIn("{no}", json.dumps(spec, ensure_ascii=False))
         self.assertTrue(meta["priority"].startswith("提案"))
         out = os.path.join(tempfile.mkdtemp(), "t.pptx")
