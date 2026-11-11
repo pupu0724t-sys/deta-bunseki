@@ -19,7 +19,14 @@ python run.py build output/diagnosis.json analysis.json -o output/report.pptx
 CSVと原稿PDFをClaudeに渡し、`docs/提案書作成プロンプト.md` の内容で依頼する。
 数値の診断（`run.py diagnose`）は、計算の確認用として使える。
 
-## データと原稿から提案書を作る（メインの使い方）
+## データと原稿から提案書を自動で作る（いちばん簡単な使い方）
+```
+python run.py proposal auto データ1.csv データ2.csv --pdf 原稿.pdf --client "顧客名" --work data/work_顧客 -o output/顧客 --name 提案書 [--nearby 周辺求人.csv] [--market 市場データ.csv] [--posted 掲載開始日] [--forbid-file 他社名.txt]
+```
+- 数値の診断と原稿の自動チェックから、提案（最大7つ）を含む提案書（pptx）と担当者向け資料（xlsx）を自動で作る（`indeed_tool/rules.py`）。外部のAIは使わない。
+- 出来上がりは下書き。〇〇（お客様に確認する情報）を埋め、内容を確認してから提出する。
+
+## データと原稿から提案書を作る（手で磨き込む場合）
 ```
 # 1) 下準備：CSVの集計・診断、原稿PDFの全文抽出と自動チェック、現状スライドの下書き、作業メモ
 python run.py proposal prepare データ1.csv データ2.csv --pdf 原稿.pdf --client "顧客名" -o data/work

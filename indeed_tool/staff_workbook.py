@@ -73,15 +73,16 @@ def aggregate(rows):
     agg = OrderedDict()
     for r in rows:
         k = (r["職種タイトル"], r.get("参照番号", ""))
+        start = r.get("期間開始") or r["配信日"]  # 月次データは期間開始・日数の列を持つ
         a = agg.setdefault(k, {"title": r["職種タイトル"], "ref": r.get("参照番号", ""), "imp": 0, "clk": 0, "st": 0,
-                               "app": 0, "cost": 0.0, "days": 0, "first": r["配信日"], "last": r["配信日"]})
+                               "app": 0, "cost": 0.0, "days": 0, "first": start, "last": r["配信日"]})
         a["imp"] += parse_number(r["表示数"]) or 0
         a["clk"] += parse_number(r["クリック数"]) or 0
         a["st"] += parse_number(r["応募開始数"]) or 0
         a["app"] += parse_number(r["応募数"]) or 0
         a["cost"] += parse_number(r["利用済予算"]) or 0
-        a["days"] += 1
-        a["first"] = min(a["first"], r["配信日"])
+        a["days"] += int(parse_number(r.get("日数")) or 1)
+        a["first"] = min(a["first"], start)
         a["last"] = max(a["last"], r["配信日"])
     return list(agg.values())
 

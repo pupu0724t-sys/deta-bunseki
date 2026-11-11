@@ -72,3 +72,19 @@ class PipelineTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MonthlyCsvTest(unittest.TestCase):
+    def test_monthly_partial_period(self):
+        d = tempfile.mkdtemp()
+        p = os.path.join(d, "広告配信実績_求人_1234567_テスト　2026_11_1～11_30（14万）_20261110_115750.csv")
+        with open(p, "w", encoding="utf-8-sig", newline="") as fh:
+            fh.write('"求人番号","求人内容","求人メモ","表示数","クリック率","クリック数","応募開始率","応募開始数","応募完了率","応募数","応募率","クリック単価","応募開始単価","応募単価","利用済予算","雇用形態"\n')
+            fh.write('"合計","",,"1,836","4.03%","74","0%","0","0%","0","0%","￥657","￥0","￥0","￥48,646",\n')
+            fh.write('"999","【正社員】テスト","メモ","1,836","4.03%","74","0%","0","0%","0","0%","￥657","￥0","￥0","￥48,646","正社員"\n')
+        rows = pipeline.load_source(p)
+        self.assertEqual(len(rows), 1)  # 合計行は除く
+        r = rows[0]
+        self.assertEqual((r["期間開始"], r["配信日"], r["日数"]), ("2026/11/01", "2026/11/10", 10))  # 出力日までの途中経過
+        self.assertEqual(r["参照番号"], "1234567")
+        self.assertEqual(r["職種タイトル"], "【正社員】テスト")

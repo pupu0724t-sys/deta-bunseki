@@ -22,27 +22,39 @@ def main():
     b.add_argument("analysis")
     b.add_argument("-o", default="output/report.pptx")
     p = sub.add_parser("proposal", help="データと原稿から提案書を作る（prepare：下準備／build：組み立て）")
-    p.add_argument("action", choices=["prepare", "build"])
-    p.add_argument("paths", nargs="+", help="prepare：日別CSV（原稿ごと）／build：作業フォルダ")
+    p.add_argument("action", choices=["prepare", "build", "auto"])
+    p.add_argument("paths", nargs="+", help="prepare・auto：CSV（原稿ごと、日別または月次）／build：作業フォルダ")
     p.add_argument("--pdf", help="原稿PDF（prepare）")
     p.add_argument("--client", default="（顧客名）", help="顧客名（prepare）")
     p.add_argument("--nearby", help="周辺求人のCSV（build）")
     p.add_argument("--forbid-file", help="他のお客様の名前を1行ずつ書いたファイル。含まれていたら作成を中止（build）")
     p.add_argument("--name", default="提案書", help="出力ファイル名（build）")
+    p.add_argument("--market", help="採用市場レポートの数値CSV（auto・任意）")
+    p.add_argument("--posted", help="掲載開始日 YYYY/MM/DD（auto・任意。出し直しの判定に使う）")
+    p.add_argument("--work", default=None, help="作業フォルダ（auto）")
     p.add_argument("-o", default=None)
     args = ap.parse_args()
     if args.cmd == "proposal":
         from indeed_tool import pipeline
+        forbid = []
+        if args.forbid_file:
+            with open(args.forbid_file, encoding="utf-8-sig") as fh:  # BOMつきでも読める
+                forbid = [ln.strip() for ln in fh if ln.strip()]
+        if args.action == "auto":
+            pptx, xlsx, ordered = pipeline.auto(args.paths, args.pdf, args.work or "data/work", args.o or "output", args.client,
+                                                args.nearby, args.market, args.posted, forbid, args.name)
+            print(f"提案書: {pptx}")
+            print(f"担当者向け資料: {xlsx}")
+            for c in ordered:
+                print(f"  提案{c['no']} {c['name']}［{c['tag']}］")
+            print("※自動で作った下書きです。内容を確認・修正してから提出してください（〇〇は確認後に記載）")
+            return
         if args.action == "prepare":
             out = args.o or "data/work"
             r = pipeline.prepare(args.paths, args.pdf, out, args.client)
             print(f"下準備ができました: {out}")
             print(f"  作業メモ: {out}/brief.md\n  提案の中身: {out}/proposal_spec.json（Claudeが書く）\n  補足情報: {out}/staff_meta.json")
         else:
-            forbid = []
-            if args.forbid_file:
-                with open(args.forbid_file, encoding="utf-8-sig") as fh:  # BOMつきでも読める
-                    forbid = [ln.strip() for ln in fh if ln.strip()]
             pptx, xlsx, unresolved = pipeline.build_all(args.paths[0], args.o or "output", args.nearby, forbid, args.name)
             print(f"提案書: {pptx}\n担当者向け資料: {xlsx}")
             if unresolved:

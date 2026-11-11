@@ -536,9 +536,81 @@ def slide_goal(prs, sp, page):
         s.notes_slide.notes_text_frame.text = "\n".join(sp["notes"])
 
 
+def _table(s, x, y, widths, heads, rows, row_h=0.62, size=11.5, hl_col=None, wrap_first_bold=True):
+    """角丸セルの表。rows のセルは文字列（**赤太字** 可）。"""
+    cx = x
+    for j, hd in enumerate(heads):
+        box(s, cx, y, widths[j] - 0.05, 0.42, NAVY, radius=0.05)
+        text(s, cx, y, widths[j] - 0.05, 0.42, hd, size=11.5, color=WHITE, bold=True, align=PP_ALIGN.CENTER,
+             anchor=MSO_ANCHOR.MIDDLE)
+        cx += widths[j]
+    for i, row in enumerate(rows):
+        ry = y + 0.5 + i * (row_h + 0.08)
+        cx = x
+        for j, cell in enumerate(row):
+            fill = PINK if hl_col is not None and j == hl_col else (PANEL if i % 2 == 0 else WHITE)
+            box(s, cx, ry, widths[j] - 0.05, row_h, fill, line=None if fill != WHITE else BORDER, radius=0.05)
+            text(s, cx + 0.1, ry, widths[j] - 0.25, row_h, [rich(str(cell))], size=size,
+                 color=NAVY if j == 0 else TEXT, bold=(j == 0 and wrap_first_bold), anchor=MSO_ANCHOR.MIDDLE)
+            cx += widths[j]
+    return y + 0.5 + len(rows) * (row_h + 0.08)
+
+
+def slide_summary(prs, sp, page):
+    """エグゼクティブサマリー：数値カード → 何が起きているか → 打ち手の表。"""
+    s = new_slide(prs, sp["title"], page, sp.get("notes"))
+    if sp.get("lead"):
+        text(s, 0.6, 1.1, 12.1, 0.35, sp["lead"], size=11.5, color=GRAY)
+    cards = sp["cards"]
+    cw = (12.1 - 0.25 * (len(cards) - 1)) / len(cards)
+    for i, c in enumerate(cards):
+        x = 0.6 + i * (cw + 0.25)
+        bad = c.get("bad", False)
+        box(s, x, 1.5, cw, 1.1, PINK if bad else PANEL, line=RED if bad else None)
+        text(s, x + 0.2, 1.55, cw - 0.4, 0.3, c["label"], size=11, color=GRAY)
+        text(s, x + 0.2, 1.83, cw - 0.4, 0.5, c["value"], size=24, color=RED if bad else NAVY, bold=True)
+        text(s, x + 0.2, 2.28, cw - 0.4, 0.3, c.get("sub", ""), size=10, color=GRAY)
+    text(s, 0.6, 2.72, 12.1, 0.35, "■ 何が起きているか", size=13, color=NAVY, bold=True)
+    box(s, 0.6, 3.07, 12.1, 1.3, WHITE, line=BORDER)
+    text(s, 0.85, 3.12, 11.6, 1.2, [rich(f"{i}. {t}") for i, t in enumerate(sp["findings"], 1)], size=12.5, gap=4,
+         anchor=MSO_ANCHOR.MIDDLE)
+    text(s, 0.6, 4.47, 12.1, 0.35, "■ ご提案（" + sp.get("plan_note", "求人票側の打ち手") + "）", size=13, color=NAVY, bold=True)
+    rows = sp["actions"][:4]
+    _table(s, 0.6, 4.85, [3.2, 1.6, 5.4, 1.9], ["打ち手", "対象", "内容", "狙う指標"], rows, row_h=0.3, size=10.5)
+
+
+def slide_decompose(prs, sp, page):
+    """課題の構造分解：応募単価＝クリック単価÷応募開始率÷応募完了率。基準と比べて異常値を示す。"""
+    s = new_slide(prs, sp["title"], page, sp.get("notes"))
+    text(s, 0.6, 1.1, 12.1, 0.35, sp.get("lead", ""), size=11.5, color=GRAY)
+    text(s, 0.6, 1.5, 12.1, 0.5, "応募単価（CPA）　＝　クリック単価（CPC）　÷　応募開始率　÷　応募完了率", size=17, color=NAVY,
+         bold=True, align=PP_ALIGN.CENTER)
+    for i, f in enumerate(sp["factors"]):
+        x = 0.6 + i * 4.1
+        bad = f.get("bad", False)
+        box(s, x, 2.2, 3.9, 2.25, PINK if bad else PANEL, line=RED if bad else None)
+        text(s, x + 0.2, 2.3, 3.5, 0.3, f["label"], size=11.5, color=GRAY)
+        text(s, x + 0.2, 2.62, 3.5, 0.7, f["value"], size=30, color=RED if bad else NAVY, bold=True)
+        text(s, x + 0.2, 3.32, 3.5, 0.3, f["base"], size=11, color=GRAY)
+        pill(s, x + 0.2, 3.75, 2.4, 0.36, f["verdict"], fill=RED if bad else GRAY, size=11)
+    box(s, 0.6, 4.65, 12.1, 2.2, WHITE, line=BORDER)
+    text(s, 0.85, 4.75, 11.6, 2.0, [rich(t) for t in sp["points"]], size=13, gap=6, bullet=True, anchor=MSO_ANCHOR.MIDDLE)
+
+
+def slide_plan(prs, sp, page):
+    """実行計画とご依頼事項。"""
+    s = new_slide(prs, sp["title"], page, sp.get("notes"))
+    if sp.get("lead"):
+        text(s, 0.6, 1.1, 12.1, 0.35, sp["lead"], size=11.5, color=GRAY)
+    n = len(sp["rows"])
+    rh = min(0.7, (5.3 - 0.5) / max(n, 1) - 0.08)
+    _table(s, 0.6, 1.55, [0.5, 1.4, 2.6, 1.9, 4.0, 1.7], ["#", "時期", "打ち手", "対象", "実施内容", "確認指標"],
+           [[str(i)] + list(r) for i, r in enumerate(sp["rows"], 1)], row_h=rh, size=10.5, wrap_first_bold=False)
+
+
 TYPES = {"cover": slide_cover, "funnel": slide_funnel, "issues": slide_issues, "overview": slide_overview,
          "title_ba": slide_title_ba, "proposal": slide_proposal, "kpi": slide_kpi, "checklist": slide_checklist,
-         "goal": slide_goal}
+         "goal": slide_goal, "summary": slide_summary, "decompose": slide_decompose, "plan": slide_plan}
 
 
 def build(spec, out_path):

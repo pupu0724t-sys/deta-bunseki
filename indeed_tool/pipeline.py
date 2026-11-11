@@ -44,29 +44,80 @@ def read_daily(path):
     raise ValueError(f"文字コードを判別できません: {path}")
 
 
+NORM_FIELDS = ["職種タイトル", "参照番号", "配信日", "期間開始", "日数", "表示数", "クリック数", "応募開始数", "応募数", "クリック単価", "利用済予算"]
+
+
+def _export_date(path):
+    m = re.search(r"_(\d{4})(\d{2})(\d{2})_\d{6}\.csv$", path)
+    return date(int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else None
+
+
+def _period_from_name(path):
+    """ファイル名「…2026_11_1～11_30…」から集計期間を読む。"""
+    m = re.search(r"(\d{4})_(\d{1,2})_(\d{1,2})\s*[～~〜-]\s*(\d{1,2})_(\d{1,2})", os.path.basename(path))
+    if not m:
+        return None
+    y, mo, d, mo2, d2 = (int(x) for x in m.groups())
+    return date(y, mo, d), date(y + (1 if mo2 < mo else 0), mo2, d2)
+
+
+def load_source(path):
+    """日別CSV(広告詳細)または月次CSV(広告配信実績)を、共通の形(NORM_FIELDS)に直して返す。
+    月次CSVは1行が1期間の合計。期間はファイル名から読み、出力日が期間内なら出力日までの途中経過とする。"""
+    rows = read_daily(path)
+    if not rows:
+        return []
+    ref, title = _name_parts(path)
+    if "配信日" in rows[0]:  # 日別
+        out = []
+        for r in rows:
+            if (r.get("配信日") or "").strip() in ("合計", "総計", ""):
+                continue
+            out.append({"職種タイトル": title, "参照番号": ref, "配信日": r["配信日"], "期間開始": "", "日数": "",
+                        "表示数": r.get("表示数"), "クリック数": r.get("クリック数"), "応募開始数": r.get("応募開始数"),
+                        "応募数": r.get("応募数"), "クリック単価": r.get("クリック単価"), "利用済予算": r.get("利用済予算")})
+        return out
+    if "求人番号" in rows[0]:  # 月次
+        per = _period_from_name(path)
+        if not per:
+            raise ValueError(f"月次CSVの期間をファイル名から読めません: {os.path.basename(path)}")
+        first, last = per
+        exp = _export_date(path)
+        partial = bool(exp and first <= exp < last)
+        if partial:
+            last = exp
+        out = []
+        for r in rows:
+            if (r.get("求人番号") or "").strip() in ("合計", "総計", ""):
+                continue
+            out.append({"職種タイトル": (r.get("求人内容") or title).strip(), "参照番号": ref,
+                        "配信日": last.strftime("%Y/%m/%d"), "期間開始": first.strftime("%Y/%m/%d"),
+                        "日数": (last - first).days + 1, "表示数": r.get("表示数"), "クリック数": r.get("クリック数"),
+                        "応募開始数": r.get("応募開始数"), "応募数": r.get("応募数"), "クリック単価": r.get("クリック単価"),
+                        "利用済予算": r.get("利用済予算")})
+        return out
+    raise ValueError(f"CSVの形式を判別できません（日別・月次のどちらでもない）: {os.path.basename(path)}")
+
+
 def combine(csv_paths, out_path):
-    """原稿ごとの日別CSVを、職種タイトル・参照番号つきの1つのCSVにまとめる(合計行は除く)。"""
-    rows_out, fields = [], None
-    # 同じ広告(参照番号)のCSVが複数あるときは、配信日が最も新しいもの(同じなら行数が多いもの)だけを使う
+    """原稿ごとのCSV(日別または月次)を、職種タイトル・参照番号つきの1つのCSVにまとめる(合計行は除く)。"""
+    rows_out = []
+    # 同じ広告(参照番号)のCSVが複数あるときは、配信日が最も新しいもの(同じなら出力日時が後のもの)だけを使う
     best = {}
     for p in csv_paths:
         ref, _ = _name_parts(p)
-        rs = [r for r in read_daily(p) if (r.get("配信日") or "").strip() not in ("合計", "総計", "")]
+        rs = load_source(p)
         stamp = "_".join(os.path.splitext(os.path.basename(p))[0].split("_")[-2:])  # 出力日時(例 20261105_093241)。後のものが完全なデータ
         key = (max((r["配信日"] for r in rs), default=""), stamp, len(rs))
         if not ref:
-            best[p] = (key, p)
+            best[p] = (key, rs)
         elif ref not in best or key > best[ref][0]:
-            best[ref] = (key, p)
-    for _, p in best.values():
-        ref, title = _name_parts(p)
-        for r in read_daily(p):
-            if (r.get("配信日") or "").strip() in ("合計", "総計", ""):
-                continue
-            rows_out.append({"職種タイトル": title, "参照番号": ref, **r})
-            fields = fields or list(rows_out[-1].keys())
+            best[ref] = (key, rs)
+    for _, rs in best.values():
+        rows_out.extend(rs)
+    fields = NORM_FIELDS
     if not rows_out:
-        raise ValueError("日別データが読み込めませんでした")
+        raise ValueError("データが読み込めませんでした")
     with open(out_path, "w", newline="", encoding="utf-8-sig") as fh:
         w = csv.DictWriter(fh, fieldnames=fields)
         w.writeheader()
@@ -118,7 +169,7 @@ def check_manuscript(text):
     out["info"].append(f"原稿全体の文字数（目安）：{len(re.sub(r'\\s', '', text))}文字")
 
     ot = sorted({re.sub(r"\s+", "", x) for x in re.findall(
-        r"残業(?:ほぼ)?(?:少|なし|ゼロ)|月?平均残業時間\s*\d+\s*時間(?:以内)?|残業月?\s*\d+(?:\.\d+)?\s*時間(?:以内)?|固定残業時間[:：]?\s*(?:1ヶ月あたり)?\d+\s*時間", t)})
+        r"残業(?:ほぼ)?(?:少|なし|無し|ゼロ)|月?平均残業時間\s*\d+\s*時間(?:以内)?|残業月?\s*\d+(?:\.\d+)?\s*時間(?:以内)?|固定残業時間[:：]?\s*(?:1ヶ月あたり)?\d+\s*時間", t)})
     if len(ot) >= 3:
         out["flags"].append(("条件表記のゆれ", f"残業の表記が{len(ot)}通り：" + "／".join(x.strip() for x in ot[:6]), "表記を数値1つにそろえる提案の候補"))
     if re.search(r"(履歴書|職務経歴書)[^\n]{0,20}(送付|郵送|送信|アップロード|ご提出|提出)", t):
@@ -176,6 +227,17 @@ def funnel_slide(aggs, client_label):
                 "cvr": a["app"] / a["clk"] if a["clk"] else None, "cpday": a["clk"] / a["days"]}
 
     mc, mp = m(cur), (m(prev) if prev else None)
+    # 同じ原稿(タイトルが同じ)の月ごとの比較か、原稿が違う前回/今回の比較かで、呼び方を変える
+    same_ad = bool(prev) and prev["title"] == cur["title"]
+    if same_ad:
+        import calendar
+        y, mo = int(cur["last"][:4]), int(cur["last"][5:7])
+        partial = int(cur["last"][8:10]) < calendar.monthrange(y, mo)[1]
+        lp = f"{int(prev['first'][5:7])}月"
+        lc = f"{int(cur['first'][5:7])}月" + ("(途中経過)" if partial else "")
+        name_prev, name_cur = f"{lp}分", f"{int(cur['first'][5:7])}月分" + ("（途中）" if partial else "")
+    else:
+        lp, lc, name_prev, name_cur = "前回", "今回", "前回原稿", "今回原稿"
 
     def worse(k, higher_is_worse=False, th=0.1):
         if not mp or mp[k] is None or mc[k] is None:
@@ -193,26 +255,28 @@ def funnel_slide(aggs, client_label):
             {"v": f"{mm['cpa']:,.0f}円" if mm["cpa"] else "算出不可", "s": f"応募{a['app']:,.0f}件" if a["app"] else "応募0件",
              "bad": hl and (not a["app"] or worse("cpa", True, 0.3))}]
         short = a["title"] if len(a["title"]) <= 12 else a["title"][:12] + "…"
-        return {"name": label, "sub": f"{short}｜{_md(a['first'])}〜{_md(a['last'])}", "highlight": hl, "cells": cells}
+        sub = (f"{_md(a['first'])}〜{_md(a['last'])}（{a['days']}日）" if same_ad else f"{short}｜{_md(a['first'])}〜{_md(a['last'])}")
+        return {"name": label, "sub": sub, "highlight": hl, "cells": cells}
 
-    rows = ([row(prev, mp, "前回原稿", False)] if prev else []) + [row(cur, mc, "今回原稿" if prev else "対象原稿", True)]
+    rows = ([row(prev, mp, name_prev, False)] if prev else []) + [row(cur, mc, name_cur if prev else "対象原稿", True)]
     pts = []
     if prev:
-        same = abs(mc["cpd"] / mp["cpd"] - 1) <= 0.15
-        if same and mp["cpc"] and mc["cpc"] and mc["cpc"] / mp["cpc"] >= 1.3:
-            pts.append(f"1日の費用は前回とほぼ同じですが、**クリック単価が約{mc['cpc'] / mp['cpc']:.1f}倍**になり、1日のクリック数は約{mp['cpday']:.0f}件→約{mc['cpday']:.0f}件に変化しています")
+        same_cost = abs(mc["cpd"] / mp["cpd"] - 1) <= 0.15
+        if same_cost and mp["cpc"] and mc["cpc"] and mc["cpc"] / mp["cpc"] >= 1.3:
+            pts.append(f"1日の費用は{lp}とほぼ同じですが、**クリック単価が約{mc['cpc'] / mp['cpc']:.1f}倍**になり、1日のクリック数は約{mp['cpday']:.0f}件→約{mc['cpday']:.0f}件に変化しています")
         else:
             pts.append(f"クリック率 {_pct(mp['ctr'])} → **{_pct(mc['ctr'])}**、1日のクリック数 約{mp['cpday']:.0f}件 → 約{mc['cpday']:.0f}件")
     if cur["st"] > 0 and cur["app"] == 0:
-        pts.append(f"応募を始めた{cur['st']:.0f}名が**全員、完了前に離脱**。" + (f"前回原稿は約{mp['acr'] * 100:.0f}%が完了しており、最も大きな差はここにあります" if mp and mp["acr"] else ""))
+        pts.append(f"応募を始めた{cur['st']:.0f}名が**全員、完了前に離脱**。" + (f"{lp}は約{mp['acr'] * 100:.0f}%が完了しており、最も大きな差はここにあります" if mp and mp["acr"] else ""))
     elif mp and mp["acr"] is not None and mc["acr"] is not None:
-        pts.append(f"応募完了率は 前回{_pct(mp['acr'])} → **今回{_pct(mc['acr'])}**")
+        pts.append(f"応募完了率は {lp}{_pct(mp['acr'])} → **{lc}{_pct(mc['acr'])}**")
     else:
         pts.append(f"クリック率 {_pct(mc['ctr'])}（目安 {_pct(DEFAULT_CTR)}）、応募率 {_pct(mc['cvr'])}（目安 {_pct(DEFAULT_CVR)}）")
     headline = ("応募開始はあるが、完了は0件" if cur["st"] > 0 and cur["app"] == 0 else "数値の現状と課題")
     return {"type": "funnel", "title": f"現状|{headline}（※見出しは内容に合わせて修正）",
             "columns": ["1日の費用", "クリック単価", "クリック率", "応募開始率", "応募完了率", "応募単価"], "rows": rows, "points": pts,
-            "notes": ["数値はIndeed広告詳細CSV（日別データ）の集計。1日の費用＝費用÷配信日数"]}
+            "notes": ["数値はIndeedのCSV（日別または月次）の集計。1日の費用＝費用÷配信日数",
+                      "月次CSVの途中経過は、出力日までの数値。月の最終日まで配信された場合の数値ではない"]}
 
 
 def cover_slide(client, aggs):
@@ -220,7 +284,8 @@ def cover_slide(client, aggs):
     cur = aggs[-1]
     sub = f"対象：{cur['title']}（{cur['first']}〜{cur['last']}）"
     if len(aggs) > 1:
-        sub += f"／比較：前回原稿（{aggs[-2]['first']}〜{aggs[-2]['last']}）"
+        sub += (f"／比較：前月分（{aggs[-2]['first']}〜{aggs[-2]['last']}）" if aggs[-2]["title"] == cur["title"]
+                else f"／比較：前回原稿（{aggs[-2]['first']}〜{aggs[-2]['last']}）")
     return {"type": "cover", "title": "Indeed掲載原稿 改善のご提案", "client": f"{client} 御中", "sub": sub}
 
 
@@ -324,3 +389,49 @@ def build_all(workdir, outdir, nearby_path=None, forbid=None, name="提案書"):
     build_workbook(os.path.join(workdir, "combined.csv"), spec, meta, xlsx, nearby_path)
     unresolved = deck_text(spec, meta).count("（要記入")
     return pptx, xlsx, unresolved
+
+
+# ---------- auto：提案書を自動で生成する ----------
+def load_market(path):
+    """採用市場レポートの数値（手入力のCSV）。列：職種名,求職者数,求人数,求人あたり求職者数,採用難易度,平均給与,モバイル比率,現在
+    現在の職種の行は「現在」列に ○ を入れる。"""
+    if not path:
+        return None
+    rows = []
+    for r in read_daily(path):
+        if not (r.get("職種名") or "").strip():
+            continue
+        row = {"職種名": r["職種名"].strip(), "現在": bool((r.get("現在") or "").strip())}
+        for k in ("求職者数", "求人数", "求人あたり求職者数", "採用難易度", "平均給与", "モバイル比率"):
+            v = parse_number(r.get(k))
+            row[k] = (v if (k != "モバイル比率" or v is None or v <= 1) else v / 100) if v is not None else None
+        rows.append(row)
+    return rows
+
+
+def auto(csv_paths, pdf_path, workdir, outdir, client, nearby_path=None, market_path=None, posted=None,
+         forbid=None, name="提案書", max_props=7):
+    """下準備 → ルールで提案を自動作成 → 提案書(pptx)と担当者向け資料(xlsx)まで一気に作る。"""
+    from indeed_tool import rules
+    r = prepare(csv_paths, pdf_path, workdir, client)
+    with open(os.path.join(workdir, "原稿.txt"), encoding="utf-8") as fh:
+        text = fh.read()
+    nearby = None
+    if nearby_path:
+        sal = (r["checks"].get("salary") or {}).get("monthly_low")
+        nearby = nb.summarize(nb.load(nearby_path), client=sal)
+    spec, meta_fill, D, ordered = rules.build_spec(r["aggs"], text, r["checks"], client, nearby,
+                                                   load_market(market_path), posted, max_props)
+    with open(os.path.join(workdir, "proposal_spec.json"), "w", encoding="utf-8") as fh:
+        json.dump(spec, fh, ensure_ascii=False, indent=2)
+    mp = os.path.join(workdir, "staff_meta.json")
+    with open(mp, encoding="utf-8") as fh:
+        meta = json.load(fh)
+    meta.update(meta_fill)
+    if nearby_path:
+        meta["sources"].append([f"S{len(meta['sources']) + 1}", "周辺の求人", "公開されている求人の検索結果（手作業で収集）", meta["date"],
+                                "担当者向け資料の「5.周辺比較」。提案書では社名を出さない"])
+    with open(mp, "w", encoding="utf-8") as fh:
+        json.dump(meta, fh, ensure_ascii=False, indent=2)
+    pptx, xlsx, _ = build_all(workdir, outdir, nearby_path, forbid, name)
+    return pptx, xlsx, ordered
